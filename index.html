@@ -2,17 +2,16 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>WebRTC Debug Room</title>
+<title>WebSocket Webcam Chat</title>
 <style>
 body { background:#111; color:white; text-align:center; font-family:Arial; }
-video { width:280px; margin:10px; border:2px solid #444; border-radius:10px; }
-textarea { width:90%; height:80px; margin:5px; }
-button { padding:8px; margin:5px; }
+video { width:300px; margin:10px; border-radius:10px; border:2px solid #444; }
+button { padding:10px; margin:5px; }
 </style>
 </head>
 <body>
 
-<h2>WebRTC Manual Signaling (FIXED)</h2>
+<h2>WebSocket Webcam Chat</h2>
 
 <video id="local" autoplay playsinline muted></video>
 <video id="remote" autoplay playsinline></video>
@@ -20,14 +19,10 @@ button { padding:8px; margin:5px; }
 <br>
 
 <button onclick="startCam()">📷 Kamera</button>
-<button onclick="createOffer()">🟢 Offer</button>
-<button onclick="createAnswer()">🔵 Answer</button>
-
-<br>
-
-<textarea id="box"></textarea>
+<button onclick="connect()">🔌 Bağlan</button>
 
 <script>
+let ws;
 let pc;
 let stream;
 
@@ -35,21 +30,21 @@ const config = {
   iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
 };
 
-function startPC(){
+function setupPC(){
   pc = new RTCPeerConnection(config);
 
   stream.getTracks().forEach(t => pc.addTrack(t, stream));
 
-  pc.ontrack = e => {
+  pc.ontrack = (e) => {
     document.getElementById("remote").srcObject = e.streams[0];
   };
 
-  // 🔥 CRITICAL FIX: ICE candidate streaming
-  pc.onicecandidate = (e)=>{
-    if(e.candidate){
-      const current = JSON.parse(localStorage.getItem("ice") || "[]");
-      current.push(e.candidate);
-      localStorage.setItem("ice", JSON.stringify(current));
+  pc.onicecandidate = (e) => {
+    if (e.candidate) {
+      ws.send(JSON.stringify({
+        type: "ice",
+        data: e.candidate
+      }));
     }
   };
 }
@@ -59,32 +54,48 @@ async function startCam(){
   document.getElementById("local").srcObject = stream;
 }
 
-async function createOffer(){
-  startPC();
+function connect(){
+  ws = new WebSocket("ws://localhost:3000");
 
-  const offer = await pc.createOffer();
-  await pc.setLocalDescription(offer);
+  ws.onopen = async () => {
+    setupPC();
 
-  document.getElementById("box").value = JSON.stringify(offer);
-}
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
 
-async function createAnswer(){
-  const data = JSON.parse(document.getElementById("box").value);
+    ws.send(JSON.stringify({
+      type: "offer",
+      data: offer
+    }));
+  };
 
-  if(!pc) startPC();
+  ws.onmessage = async (msg) => {
+    const m = JSON.parse(msg.data);
 
-  if(data.type === "offer"){
-    await pc.setRemoteDescription(data);
+    if (m.type === "offer") {
+      if (!pc) setupPC();
 
-    const answer = await pc.createAnswer();
-    await pc.setLocalDescription(answer);
+      await pc.setRemoteDescription(m.data);
 
-    document.getElementById("box").value = JSON.stringify(answer);
-  }
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
 
-  else if(data.type === "answer"){
-    await pc.setRemoteDescription(data);
-  }
+      ws.send(JSON.stringify({
+        type: "answer",
+        data: answer
+      }));
+    }
+
+    if (m.type === "answer") {
+      await pc.setRemoteDescription(m.data);
+    }
+
+    if (m.type === "ice") {
+      try {
+        await pc.addIceCandidate(m.data);
+      } catch(e){}
+    }
+  };
 }
 </script>
 
