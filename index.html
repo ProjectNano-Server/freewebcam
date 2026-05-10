@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Auto Webcam Rooms</title>
+<style>
+body { font-family: Arial; background:#111; color:#eee; text-align:center; }
+textarea { width:90%; height:100px; }
+button { padding:10px; margin:5px; }
+video { width:90%; max-width:500px; border:2px solid #444; margin-top:10px; }
+.page { display:none; }
+.active { display:block; }
+</style>
+</head>
+<body>
+
+<h2>Webcam Room System</h2>
+
+<div id="home" class="page active">
+  <button onclick="createRoom()">📱 Kamera Başlat</button>
+  <button onclick="joinMode()">💻 Odaya Gir</button>
+  <p id="roomInfo"></p>
+</div>
+
+<div id="host" class="page">
+  <h3>HOST (Telefon)</h3>
+  <video id="localVideo" autoplay muted playsinline></video>
+</div>
+
+<div id="join" class="page">
+  <h3>VIEWER (PC)</h3>
+  <input id="roomInput" placeholder="Room ID">
+  <button onclick="joinRoom()">Bağlan</button>
+  <video id="remoteVideo" autoplay playsinline></video>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+
+<script>
+// 🔥 Firebase config (burayı kendi config'inle değiştir)
+const firebaseConfig = {
+  apiKey: "YOUR_KEY",
+  authDomain: "YOUR_PROJECT.firebaseapp.com",
+  databaseURL: "https://YOUR_PROJECT.firebaseio.com",
+  projectId: "YOUR_PROJECT"
+};
+
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+
+let pc;
+let localStream;
+let roomId;
+
+// STUN server
+const config = {
+  iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+};
+
+// ---------------- UI ----------------
+function show(id){
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+}
+
+// ---------------- HOST ----------------
+async function createRoom(){
+  roomId = Math.random().toString(36).substring(2,8);
+  document.getElementById("roomInfo").innerText = "Room ID: " + roomId;
+
+  show('host');
+
+  pc = new RTCPeerConnection(config);
+
+  localStream = await navigator.mediaDevices.getUserMedia({ video:true, audio:false });
+  document.getElementById("localVideo").srcObject = localStream;
+
+  localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
+
+  const roomRef = db.ref("rooms/" + roomId);
+
+  pc.onicecandidate = e => {
+    if (e.candidate) return;
+    roomRef.child("offer").set(JSON.stringify(pc.localDescription));
+  };
+
+  let offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+
+  roomRef.on("value", async snap => {
+    const data = snap.val();
+    if (!data) return;
+
+    if (data.answer && !pc.currentRemoteDescription) {
+      await pc.setRemoteDescription(JSON.parse(data.answer));
+    }
+  });
+}
+
+// ---------------- VIEWER ----------------
+function joinMode(){
+  show('join');
+}
+
+async function joinRoom(){
+  roomId = document.getElementById("roomInput").value;
+  const roomRef = db.ref("rooms/" + roomId);
+
+  pc = new RTCPeerConnection(config);
+
+  pc.ontrack = e => {
+    document.getElementById("remoteVideo").srcObject = e.streams[0];
+  };
+
+  pc.onicecandidate = e => {
+    if (e.candidate) return;
+    roomRef.child("answer").set(JSON.stringify(pc.localDescription));
+  };
+
+  const room = await roomRef.once("value");
+  const data = room.val();
+
+  await pc.setRemoteDescription(JSON.parse(data.offer));
+
+  const answer = await pc.createAnswer();
+  await pc.setLocalDescription(answer);
+}
+</script>
+
+</body>
+</html>
