@@ -1,270 +1,87 @@
 <!DOCTYPE html>
-<html lang="tr">
-
+<html>
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-
-<title>Webcam Room System</title>
-
+<meta charset="utf-8">
+<title>Webcam Room (Fixed)</title>
 <style>
-
-body{
-    margin:0;
-    padding:20px;
-    background:#111;
-    color:white;
-    font-family:Arial;
-    text-align:center;
-}
-
-.page{
-    display:none;
-}
-
-.active{
-    display:block;
-}
-
-button{
-    padding:12px 20px;
-    margin:5px;
-    border:none;
-    border-radius:10px;
-    background:#333;
-    color:white;
-    cursor:pointer;
-    font-size:16px;
-}
-
-button:hover{
-    background:#555;
-}
-
-input{
-    padding:12px;
-    width:280px;
-    border:none;
-    border-radius:10px;
-    font-size:16px;
-}
-
-video{
-    width:95%;
-    max-width:700px;
-    margin-top:15px;
-    border-radius:12px;
-    border:2px solid #444;
-    background:black;
-}
-
-.linkBox{
-    margin-top:15px;
-    padding:12px;
-    background:#222;
-    border-radius:10px;
-    word-break:break-all;
-}
-
+body { font-family: Arial; background:#111; color:#fff; text-align:center; }
+video { width:300px; margin:10px; border:2px solid #444; border-radius:10px; }
+textarea { width:90%; height:80px; margin:5px; }
+button { padding:10px; margin:5px; }
 </style>
 </head>
-
 <body>
 
-<h1>Webcam Room System</h1>
+<h2>Webcam Room System</h2>
 
-<!-- HOME -->
-<div id="home" class="page active">
+<video id="localVideo" autoplay playsinline muted></video>
+<video id="remoteVideo" autoplay playsinline></video>
 
-    <button onclick="createRoom()">
-        📱 Kamera Başlat
-    </button>
+<br>
 
-    <button onclick="joinPage()">
-        💻 Odaya Gir
-    </button>
+<button onclick="startCamera()">📷 Kamerayı Başlat</button>
+<button onclick="createOffer()">➕ Oda Aç (Host)</button>
+<button onclick="setAnswer()">📥 Answer Yapıştır</button>
 
-</div>
+<br>
 
-<!-- HOST -->
-<div id="host" class="page">
-
-    <h2>Telefon Yayını</h2>
-
-    <div id="roomLink" class="linkBox"></div>
-
-    <button onclick="copyLink()">
-        Linki Kopyala
-    </button>
-
-    <video id="localVideo" autoplay muted playsinline></video>
-
-</div>
-
-<!-- JOIN -->
-<div id="join" class="page">
-
-    <h2>Bilgisayar İzleme</h2>
-
-    <input id="roomInput" placeholder="Room ID veya Link">
-
-    <button onclick="joinRoom()">
-        Bağlan
-    </button>
-
-    <video id="remoteVideo" autoplay playsinline></video>
-
-</div>
-
-<!-- Firebase -->
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<textarea id="offerBox" placeholder="Offer / Answer buraya gelecek"></textarea>
 
 <script>
-
-// 🔥 Firebase CONFIG (burayı doldur)
-const firebaseConfig = {
-    apiKey: "YOUR_KEY",
-    authDomain: "YOUR_PROJECT.firebaseapp.com",
-    databaseURL: "https://YOUR_PROJECT-default-rtdb.firebaseio.com",
-    projectId: "YOUR_PROJECT"
-};
-
-firebase.initializeApp(firebaseConfig);
-const db = firebase.database();
-
 let pc;
 let localStream;
-let roomId;
 
-const rtcConfig = {
-    iceServers: [
-        { urls: "stun:stun.l.google.com:19302" }
-    ]
+const config = {
+  iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
 };
 
-// ---------------- UI ----------------
-function showPage(id){
-    document.querySelectorAll(".page").forEach(p=>{
-        p.classList.remove("active");
-    });
-    document.getElementById(id).classList.add("active");
+async function startCamera(){
+  localStream = await navigator.mediaDevices.getUserMedia({video:true,audio:true});
+  document.getElementById("localVideo").srcObject = localStream;
 }
 
-// ---------------- COPY ----------------
-function copyLink(){
-    navigator.clipboard.writeText(
-        document.getElementById("roomLink").innerText
-    );
-    alert("Kopyalandı");
+function setupPC(){
+  pc = new RTCPeerConnection(config);
+
+  localStream.getTracks().forEach(track =>
+    pc.addTrack(track, localStream)
+  );
+
+  pc.ontrack = (event)=>{
+    document.getElementById("remoteVideo").srcObject = event.streams[0];
+  };
+
+  pc.onicecandidate = (e)=>{
+    if(e.candidate) return;
+    document.getElementById("offerBox").value =
+      JSON.stringify(pc.localDescription);
+  };
 }
 
-// ---------------- HOST ----------------
-async function createRoom(){
+async function createOffer(){
+  setupPC();
 
-    roomId = Math.random().toString(36).substring(2,8);
-
-    showPage("host");
-
-    const fullLink =
-        location.origin +
-        location.pathname +
-        "?room=" + roomId;
-
-    document.getElementById("roomLink").innerText = fullLink;
-
-    pc = new RTCPeerConnection(rtcConfig);
-
-    localStream = await navigator.mediaDevices.getUserMedia({
-        video:true,
-        audio:false
-    });
-
-    document.getElementById("localVideo").srcObject = localStream;
-
-    localStream.getTracks().forEach(track=>{
-        pc.addTrack(track, localStream);
-    });
-
-    const roomRef = db.ref("rooms/" + roomId);
-
-    pc.onicecandidate = e => {
-        if(e.candidate) return;
-        roomRef.child("offer").set(JSON.stringify(pc.localDescription));
-    };
-
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
-
-    roomRef.on("value", async snap=>{
-        const data = snap.val();
-        if(!data) return;
-
-        if(data.answer && !pc.currentRemoteDescription){
-            await pc.setRemoteDescription(JSON.parse(data.answer));
-        }
-    });
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
 }
 
-// ---------------- JOIN PAGE ----------------
-function joinPage(){
-    showPage("join");
-}
+async function setAnswer(){
+  const data = JSON.parse(document.getElementById("offerBox").value);
 
-// ---------------- VIEWER ----------------
-async function joinRoom(){
+  if(!pc){
+    setupPC();
+  }
 
-    let input = document.getElementById("roomInput").value.trim();
-
-    // 🔥 URL ise room id çıkar
-    if(input.includes("?room=")){
-        const url = new URL(input);
-        roomId = url.searchParams.get("room");
-    } else {
-        roomId = input;
-    }
-
-    if(!roomId){
-        alert("Room ID yok");
-        return;
-    }
-
-    const roomRef = db.ref("rooms/" + roomId);
-
-    pc = new RTCPeerConnection(rtcConfig);
-
-    pc.ontrack = e=>{
-        document.getElementById("remoteVideo").srcObject = e.streams[0];
-    };
-
-    pc.onicecandidate = e=>{
-        if(e.candidate) return;
-        roomRef.child("answer").set(JSON.stringify(pc.localDescription));
-    };
-
-    const room = await roomRef.once("value");
-    const data = room.val();
-
-    if(!data || !data.offer){
-        alert("Oda bulunamadı");
-        return;
-    }
-
-    await pc.setRemoteDescription(JSON.parse(data.offer));
+  if(data.type === "offer"){
+    await pc.setRemoteDescription(data);
 
     const answer = await pc.createAnswer();
     await pc.setLocalDescription(answer);
+  }
+  else if(data.type === "answer"){
+    await pc.setRemoteDescription(data);
+  }
 }
-
-// ---------------- AUTO JOIN ----------------
-const params = new URLSearchParams(location.search);
-const autoRoom = params.get("room");
-
-if(autoRoom){
-    showPage("join");
-    document.getElementById("roomInput").value = autoRoom;
-}
-
 </script>
 
 </body>
