@@ -2,86 +2,88 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>Webcam Room (Fixed)</title>
+<title>WebRTC Auto Room</title>
 <style>
-body { font-family: Arial; background:#111; color:#fff; text-align:center; }
-video { width:300px; margin:10px; border:2px solid #444; border-radius:10px; }
-textarea { width:90%; height:80px; margin:5px; }
+body { background:#111; color:white; text-align:center; font-family:Arial; }
+video { width:300px; margin:10px; border-radius:10px; border:2px solid #444; }
 button { padding:10px; margin:5px; }
 </style>
 </head>
 <body>
 
-<h2>Webcam Room System</h2>
+<h2>Auto Webcam Room (No Server)</h2>
 
-<video id="localVideo" autoplay playsinline muted></video>
-<video id="remoteVideo" autoplay playsinline></video>
-
-<br>
-
-<button onclick="startCamera()">📷 Kamerayı Başlat</button>
-<button onclick="createOffer()">➕ Oda Aç (Host)</button>
-<button onclick="setAnswer()">📥 Answer Yapıştır</button>
+<video id="local" autoplay playsinline muted></video>
+<video id="remote" autoplay playsinline></video>
 
 <br>
 
-<textarea id="offerBox" placeholder="Offer / Answer buraya gelecek"></textarea>
+<button onclick="start()">📷 Start Camera</button>
+<button onclick="host()">🟢 Host</button>
+<button onclick="join()">🔵 Join</button>
 
 <script>
 let pc;
-let localStream;
+let stream;
+
+const channel = new BroadcastChannel("webrtc_room");
 
 const config = {
   iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
 };
 
-async function startCamera(){
-  localStream = await navigator.mediaDevices.getUserMedia({video:true,audio:true});
-  document.getElementById("localVideo").srcObject = localStream;
-}
-
 function setupPC(){
   pc = new RTCPeerConnection(config);
 
-  localStream.getTracks().forEach(track =>
-    pc.addTrack(track, localStream)
-  );
+  stream.getTracks().forEach(t => pc.addTrack(t, stream));
 
-  pc.ontrack = (event)=>{
-    document.getElementById("remoteVideo").srcObject = event.streams[0];
+  pc.ontrack = (e)=>{
+    document.getElementById("remote").srcObject = e.streams[0];
   };
 
   pc.onicecandidate = (e)=>{
     if(e.candidate) return;
-    document.getElementById("offerBox").value =
-      JSON.stringify(pc.localDescription);
+    channel.postMessage({
+      type: "signal",
+      data: pc.localDescription
+    });
   };
 }
 
-async function createOffer(){
+async function start(){
+  stream = await navigator.mediaDevices.getUserMedia({video:true,audio:true});
+  document.getElementById("local").srcObject = stream;
+}
+
+async function host(){
   setupPC();
 
   const offer = await pc.createOffer();
   await pc.setLocalDescription(offer);
 }
 
-async function setAnswer(){
-  const data = JSON.parse(document.getElementById("offerBox").value);
-
-  if(!pc){
-    setupPC();
-  }
-
-  if(data.type === "offer"){
-    await pc.setRemoteDescription(data);
-
-    const answer = await pc.createAnswer();
-    await pc.setLocalDescription(answer);
-  }
-  else if(data.type === "answer"){
-    await pc.setRemoteDescription(data);
-  }
+async function join(){
+  setupPC();
 }
+
+channel.onmessage = async (event)=>{
+  const msg = event.data;
+  if(!pc) return;
+
+  if(msg.type === "signal"){
+    const data = msg.data;
+
+    if(data.type === "offer"){
+      await pc.setRemoteDescription(data);
+
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+    }
+    else if(data.type === "answer"){
+      await pc.setRemoteDescription(data);
+    }
+  }
+};
 </script>
 
 </body>
