@@ -1,103 +1,84 @@
 <!DOCTYPE html>
-<html>
+<html lang="tr">
 <head>
-<meta charset="utf-8">
-<title>WebSocket Webcam Chat</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nano Auto WebRTC</title>
+
+<script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+
 <style>
-body { background:#111; color:white; text-align:center; font-family:Arial; }
-video { width:300px; margin:10px; border-radius:10px; border:2px solid #444; }
-button { padding:10px; margin:5px; }
+html,body{
+    margin:0;
+    padding:0;
+    width:100%;
+    height:100%;
+    overflow:hidden;
+    background:black;
+    font-family:Arial;
+}
+
+#topbar{
+    position:fixed;
+    top:0;
+    left:0;
+    right:0;
+    height:60px;
+    background:#111;
+    color:white;
+    display:flex;
+    align-items:center;
+    gap:10px;
+    padding:0 10px;
+    z-index:10;
+}
+
+button{
+    border:none;
+    border-radius:10px;
+    padding:10px 16px;
+    background:#2d7cff;
+    color:white;
+    cursor:pointer;
+}
+
+input{
+    border:none;
+    border-radius:10px;
+    padding:10px;
+    width:140px;
+}
+
+video{
+    width:100vw;
+    height:100vh;
+    object-fit:contain;
+    background:black;
+}
+
+#status{
+    color:#8f8;
+}
 </style>
 </head>
 <body>
 
-<h2>WebSocket Webcam Chat</h2>
+<div id="topbar">
 
-<video id="local" autoplay playsinline muted></video>
-<video id="remote" autoplay playsinline></video>
+<input id="room" placeholder="oda kodu" value="nano37">
 
-<br>
+<button onclick="hostMode()">Yayıncı Modu</button>
+<button onclick="viewerMode()">İzleyici Modu</button>
+<button onclick="shareScreen()">Ekran Paylaş</button>
 
-<button onclick="startCam()">📷 Kamera</button>
-<button onclick="connect()">🔌 Bağlan</button>
+<div id="status">Hazır</div>
+
+</div>
+
+<video id="video" autoplay playsinline></video>
 
 <script>
-let ws;
-let pc;
-let stream;
 
-const config = {
-  iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
-};
-
-function setupPC(){
-  pc = new RTCPeerConnection(config);
-
-  stream.getTracks().forEach(t => pc.addTrack(t, stream));
-
-  pc.ontrack = (e) => {
-    document.getElementById("remote").srcObject = e.streams[0];
-  };
-
-  pc.onicecandidate = (e) => {
-    if (e.candidate) {
-      ws.send(JSON.stringify({
-        type: "ice",
-        data: e.candidate
-      }));
-    }
-  };
-}
-
-async function startCam(){
-  stream = await navigator.mediaDevices.getUserMedia({video:true,audio:true});
-  document.getElementById("local").srcObject = stream;
-}
-
-function connect(){
-  ws = new WebSocket("ws://localhost:3000");
-
-  ws.onopen = async () => {
-    setupPC();
-
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
-
-    ws.send(JSON.stringify({
-      type: "offer",
-      data: offer
-    }));
-  };
-
-  ws.onmessage = async (msg) => {
-    const m = JSON.parse(msg.data);
-
-    if (m.type === "offer") {
-      if (!pc) setupPC();
-
-      await pc.setRemoteDescription(m.data);
-
-      const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
-
-      ws.send(JSON.stringify({
-        type: "answer",
-        data: answer
-      }));
-    }
-
-    if (m.type === "answer") {
-      await pc.setRemoteDescription(m.data);
-    }
-
-    if (m.type === "ice") {
-      try {
-        await pc.addIceCandidate(m.data);
-      } catch(e){}
-    }
-  };
-}
-</script>
-
-</body>
+const video = document.getElementById("video");
+const roomInput = document.getElementById("room");
 </html>
